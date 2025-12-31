@@ -1,0 +1,7 @@
+{
+  "name": "Copy of Zen BaZi (禅意八字)2号",
+  "description": "A professional Four Pillars of Destiny (BaZi) arrangement tool with AI analysis and client management.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
