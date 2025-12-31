@@ -107,6 +107,9 @@ function App() {
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
 
+  // Manual Select Refs for auto-jump
+  const manualSelectRefs = useRef<(HTMLSelectElement | null)[]>([]);
+
   // Real-time clock for display (Only used if needed, but wheel picker drives display now)
   const [currentTime, setCurrentTime] = useState(new Date());
 
@@ -675,22 +678,33 @@ function App() {
   
   const handleVoiceInput = () => {
     if (isListening) {
-      recognitionRef.current?.stop();
+      if (recognitionRef.current) {
+          try { recognitionRef.current.stop(); } catch(e) {}
+      }
+      setIsListening(false);
       return;
     }
 
-    // FIX: Access `SpeechRecognition` and `webkitSpeechRecognition` via `(window as any)` to resolve TypeScript error.
+    // iOS/Safari Compatibility: Ensure SpeechRecognition is accessed via (window as any)
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    
     if (!SpeechRecognition) {
-      showToast("浏览器不支持语音识别");
+      showToast("当前设备不支持语音识别");
       return;
+    }
+
+    // Force secure context check (Chrome/Safari requirement)
+    if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
+        showToast("请在 HTTPS 环境下使用语音功能");
+        return;
     }
 
     const recognition = new SpeechRecognition();
     recognition.lang = 'zh-CN';
-    recognition.interimResults = false;
+    recognition.interimResults = false; // Set to true can sometimes help on iOS to keep connection alive
     recognition.continuous = false;
-    
+    recognition.maxAlternatives = 1;
+
     recognitionRef.current = recognition;
 
     recognition.onstart = () => {
@@ -703,12 +717,12 @@ function App() {
     };
 
     recognition.onerror = (event: any) => {
-      let errorMsg = "语音识别出错";
-      if (event.error === 'no-speech') {
-        errorMsg = "未检测到语音";
-      } else if (event.error === 'not-allowed') {
-        errorMsg = "请在系统设置中允许麦克风";
-      }
+      console.error("Speech Recognition Error:", event.error);
+      let errorMsg = "语音识别不可用";
+      if (event.error === 'no-speech') errorMsg = "未检测到语音";
+      else if (event.error === 'not-allowed') errorMsg = "请在系统设置中开启麦克风权限";
+      else if (event.error === 'network') errorMsg = "网络连接异常";
+      
       showToast(errorMsg);
       setIsListening(false);
     };
@@ -771,7 +785,7 @@ function App() {
                 return;
             }
         }
-        showToast("未能识别完整四柱，请再说一遍");
+        showToast("未能完整识别八字（请读：甲子丙寅...）");
       }
     };
 
@@ -791,7 +805,7 @@ function App() {
           dGan: dG, dZhi: dZ,
           hGan: hG, hZhi: hZ,
         });
-        showToast("已自动填充：" + chars.join(''));
+        showToast("识别填充成功: " + chars.join(''));
       } else {
         // Try to force fill anyway but warn user
         setPillars({
@@ -800,11 +814,17 @@ function App() {
           dGan: dG, dZhi: dZ,
           hGan: hG, hZhi: hZ,
         });
-        showToast("识别完成，但干支阴阳不配，请手动微调");
+        showToast("填充完成，建议检查干支阴阳");
       }
     };
 
-    recognition.start();
+    // iOS/Safari: start() must be called directly in the click event thread
+    try {
+        recognition.start();
+    } catch (e) {
+        console.error("Failed to start speech recognition", e);
+        showToast("无法启动语音，请重试");
+    }
   };
 
   const renderInputGroup = (content: React.ReactNode) => (
@@ -1074,10 +1094,16 @@ function App() {
                                  <div key={idx} className="flex flex-col gap-3">
                                      <div className="relative border-b border-[#d6cda4]">
                                          <select 
+                                            ref={el => manualSelectRefs.current[idx * 2] = el}
                                             className={`w-full bg-transparent text-center appearance-none text-xl font-bold py-1 outline-none ${gColor}`}
                                             value={gVal} 
                                             onChange={e => {
-                                                setPillars({...pillars, [gKey]: e.target.value, [zKey]: ''});
+                                                const val = e.target.value;
+                                                setPillars({...pillars, [gKey]: val, [zKey]: ''});
+                                                if (val) {
+                                                    // Auto-jump to branch
+                                                    setTimeout(() => manualSelectRefs.current[idx * 2 + 1]?.focus(), 10);
+                                                }
                                             }}
                                          >
                                             <option value="">-</option>
@@ -1089,9 +1115,17 @@ function App() {
 
                                      <div className="relative border-b border-[#d6cda4]">
                                         <select 
+                                            ref={el => manualSelectRefs.current[idx * 2 + 1] = el}
                                             className={`w-full bg-transparent text-center appearance-none text-xl font-bold py-1 outline-none ${zColor}`}
                                             value={zVal} 
-                                            onChange={e => setPillars({...pillars, [zKey]: e.target.value})}
+                                            onChange={e => {
+                                                const val = e.target.value;
+                                                setPillars({...pillars, [zKey]: val});
+                                                if (val && idx < 3) {
+                                                    // Auto-jump to next stem
+                                                    setTimeout(() => manualSelectRefs.current[idx * 2 + 2]?.focus(), 10);
+                                                }
+                                            }}
                                             disabled={!gVal}
                                          >
                                             <option value="">-</option>
